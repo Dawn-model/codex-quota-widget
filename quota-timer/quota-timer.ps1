@@ -17,11 +17,23 @@ function Find-CodexExe {
         return $codexPath
     }
 
-    $command = Get-Command codex.exe -ErrorAction SilentlyContinue
-    if ($command) { return $command.Source }
+    $commands = @(Get-Command codex.exe -All -ErrorAction SilentlyContinue)
+    foreach ($command in $commands) {
+        if ($command.Source -and (Test-Path -LiteralPath $command.Source -PathType Leaf)) {
+            return $command.Source
+        }
+    }
 
-    $binRoot = Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin'
-    $candidate = Get-ChildItem -LiteralPath $binRoot -Filter codex.exe -Recurse -ErrorAction SilentlyContinue |
+    $appAlias = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\codex.exe'
+    if (Test-Path -LiteralPath $appAlias -PathType Leaf) { return $appAlias }
+
+    $searchRoots = @(
+        (Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin'),
+        (Join-Path $env:LOCALAPPDATA 'Programs\Codex'),
+        (Join-Path $env:ProgramFiles 'OpenAI\Codex')
+    )
+    $candidate = $searchRoots | Where-Object { Test-Path -LiteralPath $_ -PathType Container } |
+        ForEach-Object { Get-ChildItem -LiteralPath $_ -Filter codex.exe -Recurse -ErrorAction SilentlyContinue } |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if (-not $candidate) {
         $packages = @(Get-AppxPackage -Name '*Codex*' -ErrorAction SilentlyContinue)
@@ -31,7 +43,7 @@ function Find-CodexExe {
             if ($candidate) { break }
         }
     }
-    if (-not $candidate) { throw 'Codex CLI unavailable' }
+    if (-not $candidate) { throw 'Codex CLI unavailable. Install or open Codex and sign in, then retry.' }
     return $candidate.FullName
 }
 
@@ -75,7 +87,7 @@ function Start-QuotaServer([string]$Exe) {
     $script:serverErrorDrain = $process.StandardError.ReadToEndAsync()
     $script:server = $process
     $script:rpcId = 0
-    [void](Invoke-QuotaRpc 'initialize' @{ clientInfo = @{ name = 'quota_widget'; title = 'Quota Widget'; version = '1.0' } })
+    [void](Invoke-QuotaRpc 'initialize' @{ clientInfo = @{ name = 'quota_widget'; title = 'Quota Widget'; version = '1.1.1' } })
     $process.StandardInput.WriteLine('{"method":"initialized","params":{}}')
     $process.StandardInput.Flush()
 }

@@ -47,7 +47,7 @@ public sealed class QuotaWidget : Form {
     double maxTickMs;
     double maxSyncMs,maxRenderMs,maxMetadataMs,maxPositionMs,maxShowMs;
     DateTime nextQuery = DateTime.MinValue, lastSuccess = DateTime.MinValue;
-    string primaryText = "5小时：—", weeklyText = "一周：—";
+    string primaryText = "5小时：—", weeklyText = "一周：—", lastError="";
     bool failed;
     bool userHidden;
     bool dragging;
@@ -140,6 +140,9 @@ public sealed class QuotaWidget : Form {
         pin.CheckedChanged+=delegate { TopMost=pin.Checked; };
         menu.Items.Add(pin);
         menu.Items.Add("恢复显示（仅GPT内）",null,delegate { userHidden=false; nextQuery=DateTime.MinValue; SyncToApp(); });
+        menu.Items.Add("复制诊断信息",null,delegate {
+            try { Clipboard.SetText(string.IsNullOrWhiteSpace(lastError)?"当前没有额度读取错误。":lastError); } catch { }
+        });
         menu.Items.Add("收起",null,delegate { userHidden=true; Hide(); });
         menu.Items.Add("退出",null,delegate { Close(); });
         ContextMenuStrip=menu;
@@ -348,8 +351,11 @@ public sealed class QuotaWidget : Form {
             try {
                 var ready=startingQuery.Result;
                 primaryText=ready.Primary; weeklyText=ready.Weekly;
-                lastSuccess=DateTime.UtcNow; failed=false;
-            } catch { failed=true; nextQuery=DateTime.UtcNow.AddSeconds(5); }
+                lastSuccess=DateTime.UtcNow; failed=false; lastError="";
+            } catch(Exception ex) {
+                failed=true; lastError=DiagnosticMessage(ex); nextQuery=DateTime.UtcNow.AddSeconds(5);
+                if(lastSuccess==DateTime.MinValue) { primaryText="5小时：读取失败"; weeklyText="一周：右键复制诊断"; }
+            }
             startingQuery=null;
             WriteStatus();
         }
@@ -376,6 +382,11 @@ public sealed class QuotaWidget : Form {
         var reset=TimeZoneInfo.ConvertTimeBySystemTimeZoneId(utc,"China Standard Time");
         return name+"：剩余 "+remaining.ToString("0.#")+"%（"+reset.ToString(showDate?"M月d日 HH:mm":"HH:mm")+" 重置）";
     }
+    static string DiagnosticMessage(Exception error) {
+        string message=(error==null?"Unknown error":error.GetBaseException().Message)??"Unknown error";
+        message=message.Replace("\r"," ").Replace("\n"," ").Trim();
+        return message.Length>1200?message.Substring(0,1200):message;
+    }
     void StartQuery() {
         nextQuery=DateTime.UtcNow.AddSeconds(5);
         try {
@@ -391,15 +402,22 @@ public sealed class QuotaWidget : Form {
                     var output=p.StandardOutput.ReadToEndAsync();
                     var error=p.StandardError.ReadToEndAsync();
                     if(!p.WaitForExit(90000)) { p.Kill(); throw new Exception("Probe timed out"); }
-                    if(!Task.WaitAll(new Task[] { output,error },5000) || p.ExitCode!=0) throw new Exception("Probe failed");
-                    var data=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(output.Result.Trim());
+                    if(!Task.WaitAll(new Task[] { output,error },5000)) throw new Exception("Probe output timed out");
+                    string stderr=(error.Result??"").Trim(), stdout=(output.Result??"").Trim();
+                    if(p.ExitCode!=0) throw new Exception("Probe failed (exit "+p.ExitCode+"): "+(stderr.Length==0?"no error text":stderr));
+                    if(stdout.Length==0) throw new Exception("Probe returned no data"+(stderr.Length==0?"":"; "+stderr));
+                    var data=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(stdout);
                     string newPrimary=FormatWindow("5小时",GetWindow(data,"primary"),300,false);
                     string newWeekly=FormatWindow("一周",GetWindow(data,"secondary"),10080,true);
                     if(!newPrimary.Contains("剩余") || !newWeekly.Contains("剩余")) throw new Exception("Incomplete limits");
                     return new PendingQuery { Primary=newPrimary,Weekly=newWeekly };
                 }
             });
-        } catch { startingQuery=null; failed=true; WriteStatus(); }
+        } catch(Exception ex) {
+            startingQuery=null; failed=true; lastError=DiagnosticMessage(ex);
+            if(lastSuccess==DateTime.MinValue) { primaryText="5小时：读取失败"; weeklyText="一周：右键复制诊断"; }
+            WriteStatus();
+        }
     }
     static Task<PendingQuery> LaunchProbeAsync(Func<PendingQuery> factory) { return Task.Run(factory); }
     void Render() {
@@ -410,7 +428,7 @@ public sealed class QuotaWidget : Form {
         primaryTitle.ForeColor=PrimaryAccent;
         weeklyTitle.ForeColor=WeeklyAccent;
         FitTextWidth();
-        string detail="每5秒刷新；拖动文字调整位置；右键打开菜单。";
+        string detail=failed?"读取失败；右键选择“复制诊断信息”。":"每5秒刷新；拖动文字调整位置；右键打开菜单。";
         if(lastTooltip!=detail) {
             lastTooltip=detail;
             tips.SetToolTip(primary,detail); tips.SetToolTip(weekly,detail);
@@ -464,7 +482,7 @@ public sealed class QuotaWidget : Form {
     public static string PercentDisplay(string text) { var m=Regex.Match(text??"","剩余\\s+([0-9.]+%)"); return m.Success?"剩余 "+m.Groups[1].Value:"—"; }
     public static string ResetDisplay(string text) { int i=(text??"").IndexOf('·'); return i>=0?text.Substring(i+1).Trim():"暂无数据"; }
     void WriteStatus() {
-        string snapshot=Json.Serialize(new { primary=primaryText,weekly=weeklyText,failed=failed,lastSuccessUtc=lastSuccess.ToString("o"),refreshSeconds=5,offsetX=offsetX,offsetY=offsetY,focusHookActive=focusHook!=IntPtr.Zero,focusPollMs=poll.Interval,mainWindowAnchorOnly=true,trayKeepsWidgetVisible=true,probeStartupOffUiThread=true,fullProbeOffUiThread=true,appActive=appActiveNow,visible=Visible,userHidden=userHidden,foregroundProcess=cachedForegroundName,foregroundPid=cachedForegroundPid,appWindow=appWindow.ToInt64(),maxTickMs=Math.Round(maxTickMs,2),maxSyncMs=Math.Round(maxSyncMs,2),maxRenderMs=Math.Round(maxRenderMs,2),maxMetadataMs=Math.Round(maxMetadataMs,2),maxPositionMs=Math.Round(maxPositionMs,2),maxShowMs=Math.Round(maxShowMs,2) });
+        string snapshot=Json.Serialize(new { primary=primaryText,weekly=weeklyText,failed=failed,lastError=lastError,lastSuccessUtc=lastSuccess.ToString("o"),refreshSeconds=5,offsetX=offsetX,offsetY=offsetY,focusHookActive=focusHook!=IntPtr.Zero,focusPollMs=poll.Interval,mainWindowAnchorOnly=true,trayKeepsWidgetVisible=true,probeStartupOffUiThread=true,fullProbeOffUiThread=true,appActive=appActiveNow,visible=Visible,userHidden=userHidden,foregroundProcess=cachedForegroundName,foregroundPid=cachedForegroundPid,appWindow=appWindow.ToInt64(),maxTickMs=Math.Round(maxTickMs,2),maxSyncMs=Math.Round(maxSyncMs,2),maxRenderMs=Math.Round(maxRenderMs,2),maxMetadataMs=Math.Round(maxMetadataMs,2),maxPositionMs=Math.Round(maxPositionMs,2),maxShowMs=Math.Round(maxShowMs,2) });
         Task.Run(delegate { try { File.WriteAllText(Path.Combine(Root,"display-status.json"),snapshot); } catch { } });
     }
     static void AssertRenderedMargins(Bitmap image,int top,int bottom) {

@@ -24,3 +24,15 @@ Get-Process -Name 'QuotaWidget' -ErrorAction SilentlyContinue |
     Select-Object Name, Id, StartTime, Path |
     Format-List
 
+$statusFile = Join-Path $installRoot 'quota-widget\display-status.json'
+if (Test-Path -LiteralPath $statusFile -PathType Leaf) {
+    $displayStatus = Get-Content -LiteralPath $statusFile -Raw | ConvertFrom-Json
+    [pscustomobject]@{
+        LastRefreshUtc = $displayStatus.lastSuccessUtc
+        ProbeFailed = $displayStatus.failed
+        LastError = $displayStatus.lastError
+        Primary = $displayStatus.primary
+        Weekly = $displayStatus.weekly
+    } | Format-List
+}
+

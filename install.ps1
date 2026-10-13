@@ -27,8 +27,18 @@ Get-Process -Name 'QuotaWidget' -ErrorAction SilentlyContinue |
 
 New-Item -ItemType Directory -Force -Path $installWidgetDir, $installProbeDir, $StartupDirectory, $DesktopDirectory | Out-Null
 Copy-Item -LiteralPath $sourceWidget -Destination $installedWidget -Force
-Copy-Item -LiteralPath $sourceProbe -Destination (Join-Path $installProbeDir 'quota-timer.ps1') -Force
-Copy-Item -LiteralPath $sourceConfig -Destination (Join-Path $installProbeDir 'config.json') -Force
+$installedProbe = Join-Path $installProbeDir 'quota-timer.ps1'
+$installedConfig = Join-Path $installProbeDir 'config.json'
+Copy-Item -LiteralPath $sourceProbe -Destination $installedProbe -Force
+Copy-Item -LiteralPath $sourceConfig -Destination $installedConfig -Force
+
+# ZIP files downloaded from GitHub carry Mark-of-the-Web. Copy-Item preserves
+# that alternate data stream, and RemoteSigned would then reject our unsigned
+# local probe. The user has explicitly launched this installer, so remove the
+# download marker only from the three files installed by this package.
+foreach ($installedFile in @($installedWidget, $installedProbe, $installedConfig)) {
+    Unblock-File -LiteralPath $installedFile
+}
 
 $shell = New-Object -ComObject WScript.Shell
 $startupLink = Join-Path $StartupDirectory 'CodexQuotaWidget.lnk'
@@ -57,4 +67,5 @@ Write-Output 'Installation completed.'
 Write-Output "Installed to: $installRoot"
 Write-Output "Startup shortcut: $startupLink"
 Write-Output "Desktop shortcut: $desktopLink"
+Write-Output 'Downloaded-file markers were removed from installed package files.'
 
