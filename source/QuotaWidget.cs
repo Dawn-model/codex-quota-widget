@@ -115,7 +115,7 @@ public static class ResidentBackdrop {
 }
 
 public sealed class QuotaDetails : Form {
-    public string Plan="", Primary="", Weekly="", CreditCount="当前数据未提供", CreditExpiry="当前数据未提供";
+    public string Plan="", Primary="", Weekly="", CreditCount="当前数据未提供", CreditExpiry="当前数据未提供", SubscriptionExpiry="当前数据未提供";
     readonly float scale;
     public IntPtr BackgroundOwner=IntPtr.Zero;
     CardTheme theme=CardTheme.Parse("",false);
@@ -132,7 +132,7 @@ public sealed class QuotaDetails : Form {
     }
     public void UpdatePanelSize() {
         int lines=Math.Max(1,(CreditExpiry??"").Split('\n').Length);
-        int fullHeight=(int)((216+Math.Max(0,lines-1)*19)*scale);
+        int fullHeight=(int)((238+Math.Max(0,lines-1)*19)*scale);
         int maxHeight=Screen.PrimaryScreen.WorkingArea.Height-(int)(24*scale);
         ClientSize=new Size((int)(350*scale),Math.Min(fullHeight,maxHeight));
         AutoScrollMinSize=new Size(0,fullHeight);
@@ -171,8 +171,10 @@ public sealed class QuotaDetails : Form {
             float wx=Plan=="Pro"?20:183; DrawSubtleText(g,"一周",label,muted,wx*scale,58*scale); g.DrawString(Percent(Weekly),big,wcolor,(wx-2)*scale,80*scale); DrawSubtleText(g,Reset(Weekly),body,muted,wx*scale,120*scale);
             using(var line=new Pen(theme.Line,scale))g.DrawLine(line,20*scale,150*scale,330*scale,150*scale);
             DrawSubtleText(g,"重置卡："+CreditCount,body,muted,20*scale,164*scale);
-            DrawSubtleText(g,"到期时间：",body,muted,20*scale,185*scale);
-            DrawSubtleText(g,CreditExpiry,body,muted,96*scale,185*scale);
+            DrawSubtleText(g,"重置卡到期：",body,muted,20*scale,185*scale);
+            DrawSubtleText(g,CreditExpiry,body,muted,112*scale,185*scale);
+            int expiryLines=Math.Max(1,(CreditExpiry??"").Split('\n').Length);
+            DrawSubtleText(g,"订阅到期："+SubscriptionExpiry,body,muted,20*scale,(185+expiryLines*19)*scale);
         }
     }
 }
@@ -229,11 +231,11 @@ public sealed class QuotaWidget : Form {
     double maxTickMs;
     double maxSyncMs,maxRenderMs,maxMetadataMs,maxPositionMs,maxShowMs;
     DateTime nextQuery = DateTime.MinValue, lastSuccess = DateTime.MinValue;
-    string primaryText = "5小时：—", weeklyText = "一周：—", creditCount="当前数据未提供", creditExpiry="当前数据未提供";
+    string primaryText = "5小时：—", weeklyText = "一周：—", creditCount="当前数据未提供", creditExpiry="当前数据未提供", subscriptionExpiry="当前数据未提供";
     string plan=""; Task<string[]> creditTask; DateTime nextCredit=DateTime.MinValue; string creditCountForDetails="";
     bool failed;
     bool userHidden;
-    bool dragging;
+    bool dragging; bool pointerDown; Point pointerOrigin, windowOrigin;
     bool appActiveNow;
     bool lastContentWasApp;
     string lastLayoutKey="";
@@ -333,11 +335,10 @@ public sealed class QuotaWidget : Form {
     void FinishDrag() {
         RECT rect;
         if(appWindow!=IntPtr.Zero&&IsMainAppFrame(appWindow)&&IsWindowVisible(appWindow)&&!IsIconic(appWindow)&&GetWindowRect(appWindow,out rect)) {
-            var target=MagnetOffset(new Size(rect.Right-rect.Left,rect.Bottom-rect.Top));
-            var dropped=new Point(Left-rect.Left,Top-rect.Top);
-            magnetSnapped=NearMagnet(dropped,target,(int)Math.Round(magnetRadiusDip*GetDpiForSystem()/96.0));
-            if(magnetSnapped){offsetX=magnetX;offsetY=magnetY;Location=new Point(rect.Left+target.X,rect.Top+target.Y);}
-            else {offsetX=dropped.X;offsetY=dropped.Y;}
+            var frame=new Size(rect.Right-rect.Left,rect.Bottom-rect.Top);
+            var dropped=FitOffset(Left-rect.Left,Top-rect.Top,frame,Size);
+            magnetSnapped=false;offsetX=dropped.X;offsetY=dropped.Y;
+            Location=new Point(rect.Left+dropped.X,rect.Top+dropped.Y);
         }
         SavePosition();
     }
@@ -431,7 +432,7 @@ public sealed class QuotaWidget : Form {
             var value=CardTheme.Parse("[desktop]\nappearanceTheme = \""+args[1]+"\"",false);
             using(var preview=new QuotaDetails(2f)) {
                 preview.Primary="5小时：剩余 84%（07:00 重置）";preview.Weekly="一周：剩余 33%（11月4日 18:00 重置）";
-                preview.CreditCount="2张可用";preview.CreditExpiry="11月7日 06:33\n11月8日 06:33";preview.ApplyTheme(value);preview.UpdatePanelSize();
+                preview.CreditCount="2张可用";preview.CreditExpiry="11月7日 06:33\n11月8日 06:33";preview.SubscriptionExpiry="2026年11月14日 11:17";preview.ApplyTheme(value);preview.UpdatePanelSize();
                 using(var bitmap=new Bitmap(preview.Width,preview.Height)){preview.DrawToBitmap(bitmap,new Rectangle(Point.Empty,bitmap.Size));bitmap.Save(args[2],ImageFormat.Png);}
             }return;
         }
@@ -504,8 +505,10 @@ public sealed class QuotaWidget : Form {
         hide.Click+=delegate { userHidden=true; Hide(); }; tips.SetToolTip(hide,"收起；在聊天中说“打开额度状态栏”即可请求恢复");
         Controls.Add(hide);
         primaryTitle.Visible=false; weeklyTitle.Visible=false; primary.Visible=false; weekly.Visible=false; hide.Visible=false;
-        // Anchored over the original usage button; left click toggles details.
-        MouseClick+=delegate(object sender,MouseEventArgs e) { if(e.Button==MouseButtons.Left) ToggleDetails(); };
+        // A short click opens details; a movement beyond the system threshold drags.
+        MouseDown+=delegate(object sender,MouseEventArgs e) {if(e.Button==MouseButtons.Left){pointerDown=true;dragging=false;pointerOrigin=Cursor.Position;windowOrigin=Location;Capture=true;}};
+        MouseMove+=delegate(object sender,MouseEventArgs e) {if(!pointerDown)return;Point current=Cursor.Position;int dx=current.X-pointerOrigin.X,dy=current.Y-pointerOrigin.Y;if(!dragging && (Math.Abs(dx)>=SystemInformation.DragSize.Width/2 || Math.Abs(dy)>=SystemInformation.DragSize.Height/2)){dragging=true;CloseDetails();}if(dragging)Location=new Point(windowOrigin.X+dx,windowOrigin.Y+dy);};
+        MouseUp+=delegate(object sender,MouseEventArgs e) {if(e.Button!=MouseButtons.Left||!pointerDown)return;pointerDown=false;Capture=false;if(dragging){FinishDrag();dragging=false;SyncToApp();}else ToggleDetails();};
         Paint+=delegate(object s,PaintEventArgs e) {
             e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;
             ResidentBackdrop.Draw(e.Graphics,appWindow,Bounds);
@@ -581,7 +584,7 @@ public sealed class QuotaWidget : Form {
             if(anchor.ContainsKey("radiusDip"))magnetRadiusDip=Math.Max(4,Math.Min(100,Convert.ToInt32(anchor["radiusDip"])));
         }catch{}
 
-        try { var saved=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(Path.Combine(Root,"position.json")));
+        try { var saved=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(Path.Combine(Root,"sidebar-position.json")));
             if(saved.ContainsKey("magnetSnapped"))magnetSnapped=Convert.ToBoolean(saved["magnetSnapped"]);
             if(saved.ContainsKey("offsetX")) { offsetX=Convert.ToInt32(saved["offsetX"]); offsetY=Convert.ToInt32(saved["offsetY"]); }
             var p=new Point(Convert.ToInt32(saved["x"]),Convert.ToInt32(saved["y"]));
@@ -603,7 +606,7 @@ public sealed class QuotaWidget : Form {
         Point savedOffset;
         if(!TryGetSavedOffset(out savedOffset))return;
         offsetX=savedOffset.X;offsetY=savedOffset.Y;
-        File.WriteAllText(Path.Combine(Root,"position.json"),Json.Serialize(new { x=Left,y=Top,offsetX=offsetX,offsetY=offsetY,magnetSnapped=magnetSnapped }));
+        File.WriteAllText(Path.Combine(Root,"sidebar-position.json"),Json.Serialize(new { x=Left,y=Top,offsetX=offsetX,offsetY=offsetY,magnetSnapped=magnetSnapped }));
     } catch { } }
     void SyncToApp() {
         var syncWatch=Stopwatch.StartNew();
@@ -728,7 +731,10 @@ public sealed class QuotaWidget : Form {
         Rectangle button;
         if(!TryButtonBounds(rect,out button)){ CloseDetails(); if(Visible)Hide(); return; }
         var positionWatch=Stopwatch.StartNew();
-        var targetPosition=new Point(button.Left+(button.Width-Width)/2,button.Bottom-Height);
+        Point relative;
+        if(offsetX>=0) relative=FitOffset(offsetX,offsetY,new Size(rect.Right-rect.Left,rect.Bottom-rect.Top),Size);
+        else relative=FitOffset(button.Right-rect.Left+(int)Math.Round(12*GetDpiForSystem()/96.0),button.Bottom-rect.Top-Height,new Size(rect.Right-rect.Left,rect.Bottom-rect.Top),Size);
+        var targetPosition=new Point(rect.Left+relative.X,rect.Top+relative.Y);
         if(Location!=targetPosition){ Location=targetPosition;cardNeedsPaint=true;Invalidate(); }
         if(details!=null&&!details.IsDisposed) {var pos=new Point(Right+(int)(6*ClientSize.Width/50f), Math.Max(rect.Top,Bottom-details.Height));if(details.Location!=pos){details.Location=pos;details.Invalidate();}}
         // The renderer publishes its actual background reveal alpha, so the
@@ -774,7 +780,7 @@ public sealed class QuotaWidget : Form {
             startingQuery=null;
             WriteStatus();
         }
-        if(creditTask!=null && creditTask.IsCompleted) { try {var c=creditTask.Result; if(c!=null){creditCount=c[0];creditExpiry=c[1];creditCountForDetails=c[0];}} catch {} creditTask=null; }
+        if(creditTask!=null && creditTask.IsCompleted) { try {var c=creditTask.Result; if(c!=null){creditCount=c[0];creditExpiry=c[1];subscriptionExpiry=c[2];creditCountForDetails=c[0];}} catch {} creditTask=null; }
         if(creditTask==null && DateTime.UtcNow>=nextCredit) { nextCredit=DateTime.UtcNow.AddMinutes(5); creditTask=Task.Run((Func<string[]>)ReadCreditDetails); }
         // Reading limits is independent of whether the companion window is visible.
         // Keep a single in-flight query, including while GPT is in the background.
@@ -846,7 +852,9 @@ public sealed class QuotaWidget : Form {
     }
     static string[] ReadCreditDetails() {
         try {var info=new ProcessStartInfo {FileName=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),"WindowsPowerShell\\v1.0\\powershell.exe"),Arguments="-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File \""+Path.Combine(Root,"credit-details.ps1")+"\"",UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
-            using(var p=Process.Start(info)){var output=p.StandardOutput.ReadToEndAsync();var error=p.StandardError.ReadToEndAsync();if(!p.WaitForExit(25000)){p.Kill();return null;}Task.WaitAll(new Task[]{output,error},3000);if(p.ExitCode!=0)return null;return FormatCredits(Json.Deserialize<Dictionary<string,object>>(output.Result.Trim()));}}
+            using(var p=Process.Start(info)){var output=p.StandardOutput.ReadToEndAsync();var error=p.StandardError.ReadToEndAsync();if(!p.WaitForExit(40000)){p.Kill();return null;}Task.WaitAll(new Task[]{output,error},3000);if(p.ExitCode!=0)return null;var data=Json.Deserialize<Dictionary<string,object>>(output.Result.Trim());var credit=FormatCredits(data);
+                string expiry="当前数据未提供";object raw;if(data!=null&&data.TryGetValue("subscriptionExpiresAt",out raw)&&raw!=null) {var utc=new DateTimeOffset(1970,1,1,0,0,0,TimeSpan.Zero).AddSeconds(Convert.ToInt64(raw));expiry=TimeZoneInfo.ConvertTime(utc,TimeZoneInfo.Local).ToString("yyyy年M月d日 HH:mm");}
+                return new[]{credit[0],credit[1],expiry};}}
         catch{return null;}
     }
     void StartQuery() {
@@ -888,8 +896,8 @@ public sealed class QuotaWidget : Form {
         primary.ForeColor=Color.FromArgb(126,216,183);
         weekly.ForeColor=Color.FromArgb(200,205,218);
         primaryTitle.ForeColor=primary.ForeColor; weeklyTitle.ForeColor=weekly.ForeColor;
-        string key=plan+"\n"+primaryText+"\n"+weeklyText+"\n"+creditCount+"\n"+creditExpiry;
-        if(lastLayoutKey!=key){lastLayoutKey=key;cardNeedsPaint=true;Invalidate(); if(details!=null&&!details.IsDisposed){details.Plan=plan;details.Primary=primaryText;details.Weekly=weeklyText;details.CreditCount=creditCount;details.CreditExpiry=creditExpiry;details.UpdatePanelSize();}}
+        string key=plan+"\n"+primaryText+"\n"+weeklyText+"\n"+creditCount+"\n"+creditExpiry+"\n"+subscriptionExpiry;
+        if(lastLayoutKey!=key){lastLayoutKey=key;cardNeedsPaint=true;Invalidate(); if(details!=null&&!details.IsDisposed){details.Plan=plan;details.Primary=primaryText;details.Weekly=weeklyText;details.CreditCount=creditCount;details.CreditExpiry=creditExpiry;details.SubscriptionExpiry=subscriptionExpiry;details.UpdatePanelSize();}}
         string detail=primaryText+"\n"+weeklyText+"\n右键打开菜单";
         if(lastTooltip!=detail) {
             lastTooltip=detail;
@@ -941,7 +949,7 @@ public sealed class QuotaWidget : Form {
     void CloseDetails() { if(mouseHook!=IntPtr.Zero){UnhookWindowsHookEx(mouseHook);mouseHook=IntPtr.Zero;mouseHookCallback=null;} if(details!=null){details.Close(); details.Dispose(); details=null;} }
     void ToggleDetails() {
         if(details!=null){CloseDetails(); return;}
-        details=new QuotaDetails(ClientSize.Width/50f) {Plan=plan,Primary=primaryText,Weekly=weeklyText,CreditCount=creditCount,CreditExpiry=creditExpiry};
+        details=new QuotaDetails(ClientSize.Width/50f) {Plan=plan,Primary=primaryText,Weekly=weeklyText,CreditCount=creditCount,CreditExpiry=creditExpiry,SubscriptionExpiry=subscriptionExpiry};
         details.BackgroundOwner=appWindow;
         details.ApplyTheme(cardTheme);
         details.UpdatePanelSize();
@@ -999,7 +1007,7 @@ public sealed class QuotaWidget : Form {
     public static string PercentDisplay(string text) { var m=Regex.Match(text??"","剩余\\s+([0-9.]+%)"); return m.Success?"剩余 "+m.Groups[1].Value:"—"; }
     public static string ResetDisplay(string text) { int i=(text??"").IndexOf('·'); return i>=0?text.Substring(i+1).Trim():"暂无数据"; }
     void WriteStatus() {
-        string snapshot=Json.Serialize(new { primary=primaryText,weekly=weeklyText,failed=failed,lastSuccessUtc=lastSuccess.ToString("o"),refreshSeconds=5,offsetX=offsetX,offsetY=offsetY,magnetEnabled=true,magnetSnapped=magnetSnapped,magnetX=magnetX,magnetY=magnetY,magnetRadiusDip=magnetRadiusDip,magnetBottomAligned=magnetBottom,focusHookActive=focusHook!=IntPtr.Zero,focusPollMs=poll.Interval,mainWindowAnchorOnly=true,trayKeepsWidgetVisible=true,visibilityIndependentOfFocus=true,fullOcclusionHides=true,stackedWithGpt=true,probeStartupOffUiThread=true,fullProbeOffUiThread=true,maxTickMs=Math.Round(maxTickMs,2),maxSyncMs=Math.Round(maxSyncMs,2),maxRenderMs=Math.Round(maxRenderMs,2),maxMetadataMs=Math.Round(maxMetadataMs,2),maxPositionMs=Math.Round(maxPositionMs,2),maxShowMs=Math.Round(maxShowMs,2) });
+        string snapshot=Json.Serialize(new { primary=primaryText,weekly=weeklyText,subscriptionExpiry=subscriptionExpiry,creditCount=creditCount,failed=failed,lastSuccessUtc=lastSuccess.ToString("o"),refreshSeconds=5,offsetX=offsetX,offsetY=offsetY,magnetEnabled=true,magnetSnapped=magnetSnapped,magnetX=magnetX,magnetY=magnetY,magnetRadiusDip=magnetRadiusDip,magnetBottomAligned=magnetBottom,focusHookActive=focusHook!=IntPtr.Zero,focusPollMs=poll.Interval,mainWindowAnchorOnly=true,trayKeepsWidgetVisible=true,visibilityIndependentOfFocus=true,fullOcclusionHides=true,stackedWithGpt=true,probeStartupOffUiThread=true,fullProbeOffUiThread=true,maxTickMs=Math.Round(maxTickMs,2),maxSyncMs=Math.Round(maxSyncMs,2),maxRenderMs=Math.Round(maxRenderMs,2),maxMetadataMs=Math.Round(maxMetadataMs,2),maxPositionMs=Math.Round(maxPositionMs,2),maxShowMs=Math.Round(maxShowMs,2) });
         Task.Run(delegate { try { File.WriteAllText(Path.Combine(Root,"display-status.json"),snapshot); } catch { } });
     }
     static void AssertRenderedMargins(Bitmap image,int top,int bottom) {
@@ -1013,7 +1021,7 @@ public sealed class QuotaWidget : Form {
     static void TrayBindingTest() {
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-        string positionPath=Path.Combine(Root,"position.json"), savedPosition=File.ReadAllText(positionPath);
+        string positionPath=Path.Combine(Root,"sidebar-position.json"), savedPosition=File.ReadAllText(positionPath);
         var foregroundBefore=GetForegroundWindow();
         var foregroundStages=new List<string>();
         Action<string> recordForeground=delegate(string stage){foregroundStages.Add(stage+"="+GetForegroundWindow());};
