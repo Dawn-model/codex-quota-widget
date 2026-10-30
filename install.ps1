@@ -42,12 +42,51 @@ foreach ($link in @((Join-Path $StartupDirectory 'CodexQuotaWidget.lnk'), (Join-
     }
 }
 
-Get-Process -Name 'QuotaWidget' -ErrorAction SilentlyContinue |
-    Where-Object { $_.Path -eq $installedWidget } |
-    Stop-Process -Force
-
 New-Item -ItemType Directory -Force -Path $installWidgetDir, $installProbeDir, $StartupDirectory, $DesktopDirectory | Out-Null
-Copy-Item -LiteralPath $sourceWidget -Destination $installedWidget -Force
+# Stage on the same volume before stopping the old widget. Replacing the file
+# is atomic, so a sharing violation cannot leave a partially copied executable.
+$stagedWidget = Join-Path $installWidgetDir ('.QuotaWidget-' + [guid]::NewGuid().ToString('N') + '.tmp')
+$replaceBackup = $stagedWidget + ".old"
+$wasRunning = $false
+$replaced = $false
+try {
+    Copy-Item -LiteralPath $sourceWidget -Destination $stagedWidget
+    Unblock-File -LiteralPath $stagedWidget
+    $running = @(Get-Process -Name 'QuotaWidget' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $installedWidget })
+    foreach ($process in $running) {
+        try {
+            $wasRunning = $true
+            $process.Kill()
+            if (-not $process.WaitForExit(15000)) { throw "Timed out waiting for widget process $($process.Id) to exit." }
+        } catch [System.InvalidOperationException] { # Already exited.
+        }
+    }
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    while (-not $replaced) {
+        try {
+            if (Test-Path -LiteralPath $installedWidget -PathType Leaf) {
+                [IO.File]::Replace($stagedWidget, $installedWidget, $replaceBackup)
+            } else {
+                [IO.File]::Move($stagedWidget, $installedWidget)
+            }
+            $replaced = $true
+        } catch {
+            $failure = $_.Exception
+            while ($failure.InnerException) { $failure = $failure.InnerException }
+            if ($failure -isnot [System.IO.IOException]) { throw }
+            if ([DateTime]::UtcNow -ge $deadline) { throw "Cannot replace the widget because a process still holds the file. Close programs using $installedWidget and run install.cmd again. Backup: $backup. Details: $($_.Exception.Message)" }
+            Start-Sleep -Milliseconds 300
+        }
+    }
+} catch {
+    if ($wasRunning -and -not $replaced -and -not $NoStart -and (Test-Path -LiteralPath $installedWidget -PathType Leaf)) {
+        try { Start-Process -FilePath $installedWidget -WorkingDirectory $installWidgetDir } catch { Write-Warning 'Could not restart the previous widget; it remains on disk.' }
+    }
+    throw
+} finally {
+    if (Test-Path -LiteralPath $stagedWidget -PathType Leaf) { Remove-Item -LiteralPath $stagedWidget -Force -ErrorAction SilentlyContinue }
+    if (Test-Path -LiteralPath $replaceBackup -PathType Leaf) { Remove-Item -LiteralPath $replaceBackup -Force -ErrorAction SilentlyContinue }
+}
 $installedProbe = Join-Path $installProbeDir 'quota-timer.ps1'
 $installedConfig = Join-Path $installProbeDir 'config.json'
 if (-not (Test-Path -LiteralPath $installedProbe)) { Copy-Item -LiteralPath $sourceProbe -Destination $installedProbe; Unblock-File -LiteralPath $installedProbe }
