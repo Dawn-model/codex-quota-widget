@@ -1,4 +1,4 @@
-param([switch]$KeepFiles)
+﻿param([switch]$KeepFiles)
 $ErrorActionPreference = 'Stop'
 
 $expectedRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'CodexQuotaTools')).TrimEnd('\')
@@ -23,14 +23,13 @@ foreach ($link in @($startupLink, $desktopLink)) {
     }
 }
 
-if (-not $KeepFiles -and (Test-Path -LiteralPath $expectedRoot)) {
-    $resolved = [IO.Path]::GetFullPath($expectedRoot).TrimEnd('\')
-    $expectedParent = [IO.Path]::GetFullPath($env:LOCALAPPDATA).TrimEnd('\')
-    if ($resolved -ne (Join-Path $expectedParent 'CodexQuotaTools')) {
-        throw "Refusing to remove unexpected path: $resolved"
+if (-not $KeepFiles) {
+    foreach ($name in @('QuotaWidget.exe', 'credit-details.ps1')) {
+        $file = Join-Path (Split-Path -Parent $widget) $name
+        if (Test-Path -LiteralPath $file -PathType Leaf) { Remove-Item -LiteralPath $file -Force }
     }
-    Remove-Item -LiteralPath $resolved -Recurse -Force
 }
+Write-Output 'Timer, settings, state and backups were preserved.'
 
 Write-Output 'Uninstallation completed.'
 

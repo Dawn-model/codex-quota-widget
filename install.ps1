@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$NoStart,
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA 'CodexQuotaTools'),
     [string]$StartupDirectory = [Environment]::GetFolderPath('Startup'),
@@ -10,14 +10,35 @@ $packageRoot = $PSScriptRoot
 $sourceWidget = Join-Path $packageRoot 'quota-widget\QuotaWidget.exe'
 $sourceProbe = Join-Path $packageRoot 'quota-timer\quota-timer.ps1'
 $sourceConfig = Join-Path $packageRoot 'quota-timer\config.json'
+$sourceCredits = Join-Path $packageRoot 'quota-widget\credit-details.ps1'
 $installRoot = [IO.Path]::GetFullPath($InstallRoot)
 $installWidgetDir = Join-Path $installRoot 'quota-widget'
 $installProbeDir = Join-Path $installRoot 'quota-timer'
 $installedWidget = Join-Path $installWidgetDir 'QuotaWidget.exe'
 
-foreach ($required in @($sourceWidget, $sourceProbe, $sourceConfig)) {
+foreach ($required in @($sourceWidget, $sourceProbe, $sourceConfig, $sourceCredits)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
         throw "Required package file is missing: $required"
+    }
+}
+
+$backup = Join-Path $installRoot ('backups\widget-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
+if (Test-Path -LiteralPath $installWidgetDir) {
+    New-Item -ItemType Directory -Force -Path $backup | Out-Null
+    foreach ($name in @('QuotaWidget.exe','credit-details.ps1')) {
+        $old = Join-Path $installWidgetDir $name
+        if (Test-Path -LiteralPath $old -PathType Leaf) { Copy-Item -LiteralPath $old -Destination $backup }
+    }
+    $oldLink = Join-Path $StartupDirectory 'CodexQuotaWidget.lnk'
+    if (Test-Path -LiteralPath $oldLink) { Copy-Item -LiteralPath $oldLink -Destination $backup }
+    Write-Output "Previous widget backup: $backup"
+}
+
+$checkShell = New-Object -ComObject WScript.Shell
+$checkDesktopName = (-join @([char]0x6253,[char]0x5F00,[char]0x989D,[char]0x5EA6,[char]0x72B6,[char]0x6001,[char]0x680F)) + '.lnk'
+foreach ($link in @((Join-Path $StartupDirectory 'CodexQuotaWidget.lnk'), (Join-Path $DesktopDirectory $checkDesktopName))) {
+    if ((Test-Path -LiteralPath $link) -and $checkShell.CreateShortcut($link).TargetPath -ne $installedWidget) {
+        throw "Shortcut belongs to another program and will not be overwritten: $link"
     }
 }
 
@@ -29,14 +50,16 @@ New-Item -ItemType Directory -Force -Path $installWidgetDir, $installProbeDir, $
 Copy-Item -LiteralPath $sourceWidget -Destination $installedWidget -Force
 $installedProbe = Join-Path $installProbeDir 'quota-timer.ps1'
 $installedConfig = Join-Path $installProbeDir 'config.json'
-Copy-Item -LiteralPath $sourceProbe -Destination $installedProbe -Force
-Copy-Item -LiteralPath $sourceConfig -Destination $installedConfig -Force
+if (-not (Test-Path -LiteralPath $installedProbe)) { Copy-Item -LiteralPath $sourceProbe -Destination $installedProbe; Unblock-File -LiteralPath $installedProbe }
+if (-not (Test-Path -LiteralPath $installedConfig)) { Copy-Item -LiteralPath $sourceConfig -Destination $installedConfig; Unblock-File -LiteralPath $installedConfig }
+$installedCredits = Join-Path $installWidgetDir 'credit-details.ps1'
+Copy-Item -LiteralPath $sourceCredits -Destination $installedCredits -Force
 
 # ZIP files downloaded from GitHub carry Mark-of-the-Web. Copy-Item preserves
 # that alternate data stream, and RemoteSigned would then reject our unsigned
 # local probe. The user has explicitly launched this installer, so remove the
 # download marker only from the three files installed by this package.
-foreach ($installedFile in @($installedWidget, $installedProbe, $installedConfig)) {
+foreach ($installedFile in @($installedWidget, $installedCredits)) {
     Unblock-File -LiteralPath $installedFile
 }
 

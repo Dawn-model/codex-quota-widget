@@ -1,75 +1,25 @@
-# Codex 额度浮窗（粉色版）
+# Codex 额度侧边卡片（粉色版）
 
-这是一个 Windows 桌面小工具，用于在 ChatGPT/Codex 窗口旁显示当前账号的两个用量窗口：
+Windows 小工具：在 Codex 桌面窗口侧边显示用量、重置时间；点击卡片可展开详情。浅色为淡粉色，深色为深粉色。仅供 Windows 使用，客户端更新、系统缩放及主题可能影响定位。
 
-- 5 小时额度：显示剩余百分比和精确重置时刻。
-- 一周额度：显示剩余百分比以及“月、日、时、分”的重置时间。
+## 安装
 
-界面采用雾粉背景、深炭黑正文、莓红标题和淡玫瑰边框。浮窗只在 ChatGPT/Codex 位于前台时显示，不占任务栏，也不会出现在 Alt+Tab 列表中。
+1. 安装并登录 Codex 桌面应用及 Codex CLI，打开桌面应用。
+2. 从仓库选择 **Code → Download ZIP**，完整解压，双击 `install.cmd`。无需输入或提供 token。
+3. 切回 Codex 窗口，点击侧边卡片展开详情。若没有显示，可双击桌面的“打开额度状态栏”。右键卡片可打开菜单。
 
-## 主要功能
+安装目录为 `%LOCALAPPDATA%\CodexQuotaTools`。升级时备份原显示程序和启动快捷方式到该目录下 `backups`，保留已有查询脚本、配置及状态；首次安装才复制内置只读查询脚本。不会建立计时触发器，也不会修改 GPT 客户端。若已有非标准路径或不兼容的查询脚本，需要手动检查，勿覆盖原有计时程序。
 
-- 每 5 秒读取一次最新额度。
-- 显示格式示例：`5小时：剩余 70%（14:09 重置）`。
-- 显示格式示例：`一周：剩余 56%（10月18日 11:57 重置）`。
-- 支持拖动、置顶、收起、恢复显示和退出。
-- 支持开机登录后自动启动。
-- 安装后在桌面创建“打开额度状态栏”快捷按钮。
-- 支持 `Ctrl + Alt + Q` 唤回或启动浮窗。
-- 单实例运行：重复启动只会唤回已有窗口。
+## 数据与隐私
 
-## 隐私与安全
+额度约每 5 秒通过本机 Codex CLI 的 `account/rateLimits/read` 只读查询。重置卡数量和到期时间约每 5 分钟通过 `https://chatgpt.com/backend-api/wham/rate-limit-reset-credits` 查询，使用本机已登录账户凭据，不兑换或消费重置卡。接口、账户类型和客户端版本可能变化；查询失败时显示数据不可用。程序不包含账户凭据，请勿上传 `auth.json`、个人配置、缓存或日志。
 
-程序通过本机 Codex `app-server` 的只读接口 `account/rateLimits/read` 获取额度。它不会保存或打包账号令牌，不会发送聊天消息，也不会自动消耗模型额度。
+支持显示 Plus 等账户返回的套餐；Pro 布局尚未在 Pro 账户上验证。重置时间目前按中国标准时间显示。界面位置、遮挡和点击行为尚未在所有客户端版本和缩放下验证。
 
-本压缩包中没有个人缓存文件、登录凭据、API Key 或本机绝对路径。`config.json` 中的 `codexPath` 默认为空，程序会自动查找本机 Codex。
+## 卸载和恢复
 
-## 系统要求
+双击 `uninstall.cmd` 停止并移除卡片及其快捷方式；保留查询脚本、配置、状态和备份。升级前的程序在 `backups` 中，将对应的 `QuotaWidget.exe` 复制回 `quota-widget`，必要时恢复其中的启动快捷方式，再启动即可。卸载不会清理额外创建的计时任务。
 
-- Windows 10 或 Windows 11，64 位。
-- 已安装并登录 Codex 桌面版或 Codex CLI。
-- Windows PowerShell 5.1。
-- Microsoft .NET Framework 4.x（Windows 10/11 通常已自带）。
+## 源码编译
 
-## 快速安装
-
-1. 下载本仓库并解压整个 ZIP，不能只单独运行 EXE。
-2. 双击 `install.cmd`。
-3. 安装完成后切回 ChatGPT/Codex，浮窗会自动出现。
-
-详细步骤、故障排查和卸载方法见 [安装指南.md](安装指南.md)。
-
-> 从 GitHub 下载的 ZIP 会带有 Windows 互联网来源标记。v1.1.1 起，安装程序会仅对本项目复制到安装目录的文件解除该标记，避免额度探测脚本被 `RemoteSigned` 静默阻止。
-
-## 项目结构
-
-```text
-Codex额度浮窗-粉色版-20261013/
-├─ README.md
-├─ 安装指南.md
-├─ install.cmd / install.ps1
-├─ uninstall.cmd / uninstall.ps1
-├─ open-widget.ps1 / status.ps1
-├─ quota-widget/
-│  └─ QuotaWidget.exe
-├─ quota-timer/
-│  ├─ quota-timer.ps1
-│  └─ config.json
-├─ source/
-│  ├─ QuotaWidget.cs
-│  ├─ widget.manifest
-│  └─ build.ps1
-└─ preview/
-   └─ 粉色界面预览.png
-```
-
-## 源码说明
-
-界面主体使用 C# Windows Forms 编写；额度探测脚本使用 PowerShell。若要重新编译，请在 PowerShell 中运行：
-
-```powershell
-.\source\build.ps1
-```
-
-编译完成的程序会写入 `quota-widget\QuotaWidget.exe`，随后自动运行内置自检。
-
+Windows PowerShell 执行 `./source/build.ps1`，需要 .NET Framework 4.x 编译器和 UI Automation 程序集。发布的 EXE 可直接使用，无须自行编译。`status.ps1` 查看安装路径和最新额度刷新状态。

@@ -1,6 +1,2 @@
-Codex Quota Widget - Pink Edition
-Version: 1.1.1
-Build date: 2026-10-13
-Platform: Windows x64
-Refresh interval: 5 seconds
-Data access: read-only account/rateLimits/read
+2.0.0
+粉色侧边卡片，保留已有只读额度查询，增加重置卡只读详情。

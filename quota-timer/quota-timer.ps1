@@ -1,4 +1,4 @@
-param([switch]$ProbeOnly, [switch]$LoadOnly)
+﻿param([switch]$ProbeOnly, [switch]$LoadOnly)
 $ErrorActionPreference = 'Stop'
 
 $timerRoot = $PSScriptRoot
@@ -98,7 +98,7 @@ function Read-Quota {
     if ($result.rateLimitsByLimitId -and $result.rateLimitsByLimitId.codex) {
         $limits = $result.rateLimitsByLimitId.codex
     }
-    if (-not $limits -or -not $limits.primary) { throw 'Usage windows unavailable' }
+    if (-not $limits -or (-not $limits.primary -and -not $limits.secondary)) { throw 'Usage windows unavailable' }
     return $limits
 }
 
