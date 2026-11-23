@@ -14,7 +14,7 @@ Windows 小工具：在 Codex 桌面窗口侧边显示用量、重置时间；�
 
 额度约每 5 秒通过本机 Codex CLI 的 `account/rateLimits/read` 只读查询。订阅权益到期时间约每 5 分钟通过 `https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27` 查询，并按系统本地时区显示。订阅可能自动续费，权益到期时间不等同于取消日期。重置卡数量和到期时间通过 `https://chatgpt.com/backend-api/wham/rate-limit-reset-credits` 查询，使用本机已登录账户凭据，不兑换或消费重置卡。接口、账户类型和客户端版本可能变化；查询失败时显示数据不可用。程序不包含账户凭据，请勿上传 `auth.json`、个人配置、缓存或日志。
 
-支持显示 Plus 等账户返回的套餐；Pro 布局尚未在 Pro 账户上验证。重置时间目前按中国标准时间显示。界面位置、拖动、遮挡和点击行为尚未在所有客户端版本和缩放下验证；Pro 账户尚未实测。
+支持显示 Plus 等账户返回的套餐。重置时间目前按中国标准时间显示。
 
 升级时安装器会等待旧卡片进程退出，并重试被短暂占用的程序文件。如果提示文件仍被占用，请关闭占用该文件的程序后重新运行安装器；旧程序及备份会保留。
 
@@ -25,4 +25,5 @@ Windows 小工具：在 Codex 桌面窗口侧边显示用量、重置时间；�
 ## 源码编译
 
 Windows PowerShell 执行 `./source/build.ps1`，需要 .NET Framework 4.x 编译器和 UI Automation 程序集。发布的 EXE 可直接使用，无须自行编译。`status.ps1` 查看安装路径和最新额度刷新状态。
+
 
